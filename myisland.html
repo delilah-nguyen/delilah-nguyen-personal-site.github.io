@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Makes the page fit phone screens properly -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>My Island</title>
+<!-- Rounded, friendly font (falls back to Trebuchet MS / system font if it can't load) -->
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;900&display=swap" rel="stylesheet">
+
+<style>
+/* =====================================================================
+   FILE MAP
+   1. COLORS            – change the whole look here
+   2. PAGE BASICS       – body, fonts, full-screen setup
+   3. THE MAP           – island zoom/blur, buildings, clouds, waves
+   4. THE AVATAR        – walking, hopping, stepping into doors
+   5. TITLE SCREEN      – big "My Island" text and Play button
+   6. HINT TEXT         – "Tap a place to explore!"
+   7. THE ROOMS         – full-screen room that opens inside each building
+   ===================================================================== */
+
+
+/* ---------- 1. COLORS ---------- */
+/* These are CSS variables. Use them anywhere with var(--name). */
+:root{
+  --sea:#7fd3f0;      /* ocean */
+  --sea2:#a9e6fa;     /* lighter water / link buttons */
+  --sand:#f7e3a1;     /* beach and paths */
+  --grass:#9be07f;    /* island grass */
+  --tree:#4fb86a;     /* tree leaves */
+  --ink:#3a3358;      /* main text color */
+  --card:#ffffff;     /* white boxes and labels */
+  --accent:#ff8fb1;   /* pink buttons */
+  --shadow:rgba(58,51,88,.22);  /* soft shadow under buttons */
+  box-sizing:border-box;
+}
+
+/* Dark mode: used automatically if the visitor's device is set to dark */
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --sea:#1f4a73; --sea2:#2b628f; --sand:#b8a574; --grass:#4f8f4f; --tree:#2f6b45;
+    --ink:#f4efff; --card:#2f2f55; --shadow:rgba(0,0,0,.45);
+  }
+}
+/* Same dark colors, but only when forced with data-theme="dark" */
+:root[data-theme="dark"]{
+  --sea:#1f4a73; --sea2:#2b628f; --sand:#b8a574; --grass:#4f8f4f; --tree:#2f6b45;
+  --ink:#f4efff; --card:#2f2f55; --shadow:rgba(0,0,0,.45);
+}
+
+
+/* ---------- 2. PAGE BASICS ---------- */
+*{ box-sizing:border-box; }                      /* sizes include padding (easier math) */
+html,body{ height:100%; margin:0; overflow:hidden; }  /* the page never scrolls */
+body{
+  font-family:"Nunito","Trebuchet MS",system-ui,sans-serif;
+  font-weight:700;
+  color:var(--ink);
+  background:var(--sea);
+}
+
+
+/* ---------- 3. THE MAP ---------- */
+/* The map fills the screen. At first it's zoomed in and blurred
+   (this is the "map behind the title" effect). */
+#map{
+  position:fixed; inset:0; width:100%; height:100%;
+  transform:scale(1.3);
+  filter:blur(5px) brightness(.92);
+  transition:transform 1.6s cubic-bezier(.2,.8,.2,1), filter 1.6s;
+}
+/* When JavaScript adds the class "open" to <body> (Play pressed),
+   the map zooms out and becomes sharp. */
+body.open #map{ transform:scale(1); filter:none; }
+
+/* Each building is a ".spot". They start invisible. */
+.spot{
+  cursor:pointer; opacity:0; outline:none;
+  transform-box:fill-box; transform-origin:50% 100%;  /* grow from the bottom center */
+}
+/* ".bob" is a wrapper inside each spot that handles the hover wiggle */
+.bob{
+  transform-box:fill-box; transform-origin:50% 100%;
+  transition:transform .2s cubic-bezier(.3,1.8,.5,1);
+}
+.spot:hover .bob, .spot:focus-visible .bob{ transform:scale(1.14) translateY(-4px); }
+
+/* After Play, buildings pop in one by one.
+   Each spot has its own delay (--d) set in the HTML. */
+body.open .spot{
+  animation:pop .6s cubic-bezier(.3,1.7,.5,1) forwards;
+  animation-delay:var(--d);
+}
+@keyframes pop{
+  from{ opacity:0; transform:scale(0); }
+  to  { opacity:1; transform:scale(1); }
+}
+
+/* Name tags under each building */
+.lbl rect{ fill:var(--card); stroke:var(--ink); stroke-width:2; }
+.lbl text{ fill:var(--ink); font:900 15px "Nunito","Trebuchet MS",sans-serif; text-anchor:middle; }
+
+/* Clouds drift slowly from left to right, forever */
+.cloud{ animation:drift 70s linear infinite; fill:#fff; opacity:.85; }
+@keyframes drift{ from{ transform:translateX(-300px); } to{ transform:translateX(1100px); } }
+
+/* Little waves wobble sideways */
+.wave{ fill:none; stroke:var(--sea2); stroke-width:4; stroke-linecap:round; animation:wv 4s ease-in-out infinite; }
+@keyframes wv{ 50%{ transform:translateX(10px); } }
+
+
+/* ---------- 4. THE AVATAR (on the map) ---------- */
+/* #hero is the outer group that MOVES around the map.
+   Changing its transform in JavaScript makes it walk (the transition smooths it). */
+#hero{ transition:transform .75s cubic-bezier(.4,0,.2,1); opacity:0; }
+/* Avatar fades in a moment after Play is pressed */
+body.open #hero{
+  opacity:1;
+  transition:transform .75s cubic-bezier(.4,0,.2,1), opacity 1s 1.2s;
+}
+
+/* #heroBody is the inner group that hops and shrinks */
+#heroBody{
+  transform-box:fill-box; transform-origin:50% 100%;
+  transition:scale .35s, opacity .35s;
+}
+/* Class added when the avatar steps through a door: shrinks and vanishes */
+#heroBody.enter{ scale:.1; opacity:0; }
+
+/* Little hop while walking */
+.hop{ animation:hop .75s; }
+@keyframes hop{
+  30%{ translate:0 -18px; }
+  60%{ translate:0 0; }
+  80%{ translate:0 -6px; }
+}
+
+/* A gentle "breathing" squish, used by the avatar inside rooms */
+@keyframes idle{ 50%{ transform:scale(1.04,.96); } }
+
+
+/* ---------- 5. TITLE SCREEN ---------- */
+.title{
+  position:fixed; inset:0;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:22px; text-align:center; padding:24px;
+  transition:opacity .8s, transform 1s;
+  pointer-events:none;           /* clicks pass through empty areas */
+}
+.title>*{ pointer-events:auto; } /* ...but the button and text still work */
+
+/* After Play: title floats up and fades away */
+body.open .title{ opacity:0; transform:translateY(-40px); pointer-events:none; }
+body.open .title>*{ pointer-events:none; }
+
+/* "a personal website" pill */
+.sub{
+  margin:0; font-size:1.1rem; background:var(--card);
+  padding:6px 18px; border-radius:999px; box-shadow:0 4px 0 var(--shadow);
+}
+
+/* Big title text */
+h1{
+  margin:0; font-size:clamp(3rem,14vw,6rem); font-weight:900; line-height:1; color:#fff;
+  text-shadow:0 4px 0 var(--accent), 0 8px 0 var(--shadow), 0 0 30px rgba(255,255,255,.5);
+}
+/* JavaScript splits the title into letters (<span>) so each can bounce */
+h1 span{ display:inline-block; animation:bounce 1.4s ease-in-out infinite; }
+@keyframes bounce{ 40%{ transform:translateY(-14px); } }
+
+/* Play button: big, pink, pulsing */
+.btn{
+  font:inherit; font-weight:900; font-size:1.4rem;
+  border:0; border-radius:999px; padding:14px 48px;
+  background:var(--accent); color:#fff; cursor:pointer;
+  box-shadow:0 6px 0 var(--shadow);
+  transition:transform .1s;
+  animation:pulse 1.8s ease-in-out infinite;
+}
+.btn:active{ transform:translateY(5px); box-shadow:0 1px 0 var(--shadow); } /* "pressed" look */
+@keyframes pulse{ 50%{ scale:1.06; } }
+
+
+/* ---------- 6. HINT TEXT ---------- */
+.hint{
+  position:fixed; top:calc(14px + env(safe-area-inset-top,0px)); left:0; right:0;
+  text-align:center; opacity:0; pointer-events:none;
+  transition:opacity .6s 2.2s;   /* appears after the buildings pop in */
+}
+.hint span{ background:var(--card); padding:8px 20px; border-radius:999px; box-shadow:0 4px 0 var(--shadow); }
+body.open .hint{ opacity:1; }
+body.panel .hint{ opacity:0; transition-delay:0s; }  /* hidden while a room is open */
+
+
+/* ---------- 7. THE ROOMS ---------- */
+/* The room covers the whole screen but is "clipped" to a circle of size 0,
+   so it's invisible. When it gets the class "show", the circle grows
+   from the clicked building to cover everything (the round wipe). */
+#room{
+  position:fixed; inset:0; z-index:5;
+  display:flex; flex-direction:column;
+  background:var(--card);
+  clip-path:circle(0px at var(--ox,50%) var(--oy,50%));   /* --ox / --oy set by JavaScript */
+  visibility:hidden;
+  transition:clip-path .7s cubic-bezier(.6,0,.4,1), visibility 0s .7s;
+}
+#room.show{
+  clip-path:circle(150vmax at var(--ox,50%) var(--oy,50%));
+  visibility:visible;
+  transition:clip-path .7s cubic-bezier(.6,0,.4,1), visibility 0s;
+}
+
+/* Top bar with the Back button and room title */
+.rbar{
+  display:flex; align-items:center; gap:12px;
+  padding:calc(12px + env(safe-area-inset-top,0px)) 16px 12px;
+  background:var(--card); box-shadow:0 4px 0 var(--shadow); z-index:3;
+}
+.rbar h2{ margin:0; font-size:1.4rem; font-weight:900; }
+#back{
+  font:inherit; font-weight:900; border:0; border-radius:999px; padding:8px 18px;
+  background:var(--accent); color:#fff; cursor:pointer; box-shadow:0 4px 0 var(--shadow);
+}
+#back:active{ transform:translateY(3px); box-shadow:0 1px 0 var(--shadow); }
+
+/* The "stage": colored wall + floor + avatar + decor.
+   --wall and --floor are set per room by JavaScript. */
+.stage{
+  position:relative; flex:0 0 36%; min-height:190px; overflow:hidden;
+  background:var(--wall,#ffe3ec);
+  display:flex; align-items:flex-end; justify-content:center;
+}
+.floor{ position:absolute; left:0; right:0; bottom:0; height:34%; background:var(--floor,#e8b98a); }
+.decor{
+  position:absolute; left:0; right:0; bottom:22%;
+  display:flex; justify-content:space-between; padding:0 9%;
+  font-size:3rem; z-index:1;           /* the two emoji on the left and right */
+}
+.rhero{                                /* avatar inside the room */
+  position:relative; z-index:2; width:110px; margin-bottom:5%;
+  animation:idle 2.4s ease-in-out infinite; transform-origin:50% 100%;
+}
+.rsay{                                 /* speech bubble above the avatar */
+  position:absolute; top:12%; left:50%; transform:translateX(-50%); z-index:3;
+  background:var(--card); padding:8px 16px; border-radius:18px;
+  box-shadow:0 4px 0 var(--shadow); white-space:nowrap;
+}
+
+/* Scrollable content area below the stage */
+.rcard{
+  flex:1; overflow-y:auto; width:min(560px,100%); margin:0 auto;
+  padding:20px 20px calc(20px + env(safe-area-inset-bottom,0px));
+}
+#rbody p{ margin:0 0 10px; line-height:1.5; font-size:1.05rem; }
+
+/* Link buttons inside rooms (used by the CONTENT in the script) */
+.item{
+  display:block; background:var(--sea2); color:#3a3358;
+  border-radius:16px; padding:10px 14px; margin:8px 0; text-decoration:none;
+}
+</style>
+</head>
+
+<body>
+
+<!-- =====================================================================
+     THE MAP (an SVG drawing). Everything on the island is drawn here.
+     viewBox="0 0 800 600" means we draw on an 800 x 600 canvas
+     and it scales to fit any screen.
+     ===================================================================== -->
+<svg id="map" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid meet" aria-label="Island map">
+
+  <!-- Ocean background (oversized so it covers the screen edges) -->
+  <rect x="-2000" y="-2000" width="4800" height="4600" fill="var(--sea)"/>
+
+  <!-- Little waves -->
+  <path class="wave" d="M60 90q20-14 40 0t40 0"/>
+  <path class="wave" d="M620 60q20-14 40 0t40 0" style="animation-delay:-1s"/>
+  <path class="wave" d="M40 500q20-14 40 0t40 0" style="animation-delay:-2s"/>
+  <path class="wave" d="M690 530q20-14 40 0t40 0" style="animation-delay:-3s"/>
+
+  <!-- Island: sand edge first, then a slightly smaller grass layer on top -->
+  <path d="M130 320C100 200 220 110 360 100C520 90 680 150 700 290C720 420 600 520 440 520C280 530 150 460 130 320Z"
+        fill="var(--sand)" stroke="var(--sea2)" stroke-width="14"/>
+  <path transform="translate(415 315) scale(.9) translate(-415 -315)"
+        d="M130 320C100 200 220 110 360 100C520 90 680 150 700 290C720 420 600 520 440 520C280 530 150 460 130 320Z"
+        fill="var(--grass)"/>
+
+  <!-- Pond -->
+  <ellipse cx="470" cy="385" rx="50" ry="26" fill="var(--sea2)" stroke="var(--sand)" stroke-width="6"/>
+
+  <!-- Dotted path connecting the buildings -->
+  <path d="M250 255Q300 330 330 380M330 380Q420 330 520 235M520 235Q590 300 610 395"
+        fill="none" stroke="var(--sand)" stroke-width="12" stroke-dasharray="2 18" stroke-linecap="round"/>
+
+  <!-- Trees (just green circles) -->
+  <g fill="var(--tree)">
+    <circle cx="190" cy="330" r="22"/><circle cx="215" cy="150" r="20"/>
+    <circle cx="640" cy="230" r="22"/><circle cx="410" cy="150" r="18"/>
+    <circle cx="560" cy="470" r="20"/><circle cx="270" cy="460" r="18"/>
+  </g>
+
+  <!-- ============ CLICKABLE BUILDINGS ============
+       Each one is a <g class="spot"> with:
+         data-key = which place it is (must match CONTENT / POS / ROOMS in the script)
+         --d      = how long to wait before popping in after Play
+       To add a new building: copy one block, change the key, move the shapes. -->
+
+  <!-- ABOUT: house -->
+  <g class="spot" data-key="about" tabindex="0" role="button" aria-label="About me" style="--d:1.0s"><g class="bob">
+    <rect x="215" y="195" width="70" height="55" rx="6" fill="#fff4dd" stroke="#3a3358" stroke-width="3"/>   <!-- walls -->
+    <path d="M205 200L250 160L295 200Z" fill="#ff8fa3" stroke="#3a3358" stroke-width="3" stroke-linejoin="round"/> <!-- roof -->
+    <rect x="240" y="218" width="20" height="32" rx="4" fill="#c98f5a"/>   <!-- door -->
+    <rect x="222" y="208" width="14" height="14" rx="3" fill="#a9e6fa"/>   <!-- window -->
+    <g class="lbl"><rect x="205" y="258" width="90" height="26" rx="13"/><text x="250" y="276">About Me</text></g>
+  </g></g>
+
+  <!-- PROJECTS: workshop -->
+  <g class="spot" data-key="projects" tabindex="0" role="button" aria-label="Projects" style="--d:1.2s"><g class="bob">
+    <rect x="480" y="170" width="80" height="60" rx="6" fill="#d9f0ff" stroke="#3a3358" stroke-width="3"/>   <!-- walls -->
+    <path d="M470 178h100l-8 24h-84z" fill="#ffd36e" stroke="#3a3358" stroke-width="3" stroke-linejoin="round"/> <!-- awning -->
+    <path d="M492 178l-4 24M516 178v24M540 178l4 24" stroke="#fff" stroke-width="5"/>   <!-- awning stripes -->
+    <rect x="505" y="208" width="30" height="22" rx="3" fill="#c98f5a"/>   <!-- door -->
+    <circle cx="545" cy="152" r="10" fill="#ffa77a" stroke="#3a3358" stroke-width="3"/> <!-- sign -->
+    <g class="lbl"><rect x="475" y="238" width="90" height="26" rx="13"/><text x="520" y="256">Projects</text></g>
+  </g></g>
+
+  <!-- CONTACT: mailbox -->
+  <g class="spot" data-key="contact" tabindex="0" role="button" aria-label="Contact" style="--d:1.4s"><g class="bob">
+    <rect x="325" y="372" width="10" height="34" fill="#c98f5a"/>   <!-- post -->
+    <rect x="305" y="344" width="50" height="34" rx="14" fill="#ff6b6b" stroke="#3a3358" stroke-width="3"/> <!-- box -->
+    <rect x="320" y="356" width="20" height="4" rx="2" fill="#3a3358"/>   <!-- slot -->
+    <rect x="352" y="334" width="4" height="22" fill="#ffd36e" stroke="#3a3358" stroke-width="2"/> <!-- flag -->
+    <g class="lbl"><rect x="285" y="412" width="90" height="26" rx="13"/><text x="330" y="430">Contact</text></g>
+  </g></g>
+
+  <!-- LINKS: lighthouse -->
+  <g class="spot" data-key="links" tabindex="0" role="button" aria-label="Links" style="--d:1.6s"><g class="bob">
+    <path d="M590 395l8-80h24l8 80z" fill="#fff" stroke="#3a3358" stroke-width="3" stroke-linejoin="round"/> <!-- tower -->
+    <path d="M593 372h34M596 345h28" stroke="#ff6b6b" stroke-width="10"/>   <!-- red stripes -->
+    <rect x="596" y="295" width="28" height="20" rx="4" fill="#ffd36e" stroke="#3a3358" stroke-width="3"/> <!-- lamp -->
+    <path d="M592 296l18-22 18 22z" fill="#ff6b6b" stroke="#3a3358" stroke-width="3" stroke-linejoin="round"/> <!-- top -->
+    <g class="lbl"><rect x="565" y="403" width="90" height="26" rx="13"/><text x="610" y="421">Links</text></g>
+  </g></g>
+
+  <!-- ============ THE AVATAR (on the map) ============
+       #hero moves (JavaScript changes its transform).
+       #heroBody hops and shrinks. Starts on the beach. -->
+  <g id="hero" style="transform:translate(400px,470px)"><g id="heroBody">
+    <ellipse cx="0" cy="8" rx="16" ry="4" fill="rgba(0,0,0,.2)"/>   <!-- shadow -->
+    <path d="M0-24C16-24 24-10 23 0C22 9 12 10 0 10C-12 10-22 9-23 0C-24-10-16-24 0-24Z" fill="#ff9fbf" stroke="#3a3358" stroke-width="2.5"/> <!-- body -->
+    <circle cx="-8" cy="-6" r="3" fill="#3a3358"/><circle cx="8" cy="-6" r="3" fill="#3a3358"/>   <!-- eyes -->
+    <path d="M-5 0q5 5 10 0" stroke="#3a3358" stroke-width="2.5" fill="none" stroke-linecap="round"/> <!-- smile -->
+  </g></g>
+
+  <!-- Clouds (drawn last so they float above everything) -->
+  <g class="cloud" style="animation-delay:-10s"><ellipse cx="100" cy="60" rx="50" ry="16"/><ellipse cx="130" cy="48" rx="30" ry="16"/></g>
+  <g class="cloud" style="animation-delay:-40s"><ellipse cx="100" cy="540" rx="60" ry="16"/><ellipse cx="75" cy="528" rx="28" ry="14"/></g>
+</svg>
+
+
+<!-- =====================================================================
+     TITLE SCREEN (sits on top of the blurred map)
+     The letters of #title are filled in by JavaScript.
+     ===================================================================== -->
+<div class="title">
+  <p class="sub" id="sub">a personal website</p>
+  <h1 id="title" aria-label="My Island"></h1>
+  <button class="btn" id="play">Play</button>
+</div>
+
+<!-- Hint shown after Play -->
+<div class="hint"><span>Tap a place to explore!</span></div>
+
+
+<!-- =====================================================================
+     THE ROOM (one reusable full-screen page).
+     JavaScript fills in the title, text, colors and decor
+     depending on which building you entered.
+     ===================================================================== -->
+<section id="room" aria-live="polite">
+
+  <!-- Top bar: Back button + room name -->
+  <div class="rbar">
+    <button id="back">◀ Back to map</button>
+    <h2 id="rtitle"></h2>
+  </div>
+
+  <!-- The "stage": floor, two decor emoji, speech bubble, avatar -->
+  <div class="stage">
+    <div class="floor"></div>
+    <div class="decor"><span id="d1"></span><span id="d2"></span></div>
+    <div class="rsay" id="rsay"></div>
+    <svg class="rhero" viewBox="-30 -30 60 44">
+      <ellipse cx="0" cy="10" rx="20" ry="4" fill="rgba(0,0,0,.2)"/>
+      <path d="M0-24C16-24 24-10 23 0C22 9 12 10 0 10C-12 10-22 9-23 0C-24-10-16-24 0-24Z" fill="#ff9fbf" stroke="#3a3358" stroke-width="2.5"/>
+      <circle cx="-8" cy="-6" r="3" fill="#3a3358"/><circle cx="8" cy="-6" r="3" fill="#3a3358"/>
+      <path d="M-5 0q5 5 10 0" stroke="#3a3358" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    </svg>
+  </div>
+
+  <!-- Your content (text, links) goes here -->
+  <div class="rcard" id="rbody"></div>
+</section>
+
+
+<script>
+/* =====================================================================
+   FILE MAP
+   1. YOUR CONTENT   – edit this part to make the site yours
+   2. SETUP          – shortcuts and the bouncing title letters
+   3. PLAY BUTTON    – zooms the map open
+   4. ROOMS          – opening and closing the rooms
+   5. CLICKING A BUILDING – avatar walks, steps in, room opens
+   ===================================================================== */
+
+
+/* ---------- 1. YOUR CONTENT (EDIT THIS!) ---------- */
+
+// Big title on the first screen
+const SITE_NAME = "My Island";
+
+// Text shown inside each room. The keys (about, projects, ...) must match
+// the data-key of the buildings in the SVG above.
+// "t" = room title, "b" = the HTML shown in the room.
+const CONTENT = {
+  about:{
+    t:"About Me",
+    b:`<p>Hi! I’m [Your Name]. I love building fun things on the web. Replace this with your story.</p>`
+  },
+  projects:{
+    t:"Projects",
+    b:`<a class="item" href="#">Cool Thing #1: a short description</a>
+       <a class="item" href="#">Cool Thing #2: a short description</a>
+       <a class="item" href="#">Cool Thing #3: a short description</a>`
+  },
+  contact:{
+    t:"Contact",
+    b:`<p>Send me a message!</p>
+       <a class="item" href="mailto:you@example.com">you@example.com</a>`
+  },
+  links:{
+    t:"Links",
+    b:`<a class="item" href="#">GitHub</a>
+       <a class="item" href="#">LinkedIn</a>
+       <a class="item" href="#">Instagram</a>`
+  }
+};
+
+// Where the avatar walks to on the map (the door of each building).
+// Numbers are [x, y] on the 800 x 600 map.
+const POS = {
+  about:[250,262],
+  projects:[520,242],
+  contact:[330,408],
+  links:[610,404]
+};
+
+// How each room looks inside:
+//   wall / floor = colors, decor = two emoji, hi = what the avatar says
+const ROOMS = {
+  about:   { wall:"#ffe3ec", floor:"#e8b98a", decor:["🖼️","🪴"], hi:"Welcome in!" },
+  projects:{ wall:"#dff3ff", floor:"#b9c6d6", decor:["🖥️","💡"], hi:"Look what I made!" },
+  contact: { wall:"#ffe9d6", floor:"#d9a77a", decor:["📮","✉️"], hi:"Write to me!" },
+  links:   { wall:"#e3f6e0", floor:"#a9c9a0", decor:["🔭","🧭"], hi:"Find me elsewhere!" }
+};
+
+
+/* ---------- 2. SETUP ---------- */
+
+// Shortcut: $("play") means document.getElementById("play")
+const $ = id => document.getElementById(id);
+
+// Turn the site name into separate letters so each one can bounce.
+// Each letter starts its bounce a little later than the last (the wave effect).
+SITE_NAME.split("").forEach((letter, i) => {
+  const span = document.createElement("span");
+  span.textContent = letter === " " ? "\u00a0" : letter;   // keep spaces visible
+  span.style.animationDelay = (i * 0.08) + "s";
+  $("title").appendChild(span);
+});
+document.title = SITE_NAME;   // browser tab title
+
+
+/* ---------- 3. PLAY BUTTON ---------- */
+
+// Adding the class "open" to <body> triggers all the "body.open ..." CSS:
+// map zooms out, title fades away, buildings pop in, avatar appears.
+$("play").onclick = () => document.body.classList.add("open");
+
+
+/* ---------- 4. ROOMS ---------- */
+
+// busy = true while the avatar is walking or a room is open,
+// so visitors can't click a second building at the same time.
+let busy = false;
+
+// Open a room for the building the visitor clicked
+function enterRoom(key, building){
+  const rect = building.getBoundingClientRect();   // where the building is on screen
+  const room = $("room");
+  const look = ROOMS[key];
+
+  // The round wipe starts from the building's position
+  room.style.setProperty("--ox", (rect.left + rect.width / 2) + "px");
+  room.style.setProperty("--oy", (rect.top + rect.height * 0.75) + "px");
+
+  // Room colors
+  room.style.setProperty("--wall", look.wall);
+  room.style.setProperty("--floor", look.floor);
+
+  // Fill in the text and decor
+  $("rtitle").textContent = CONTENT[key].t;
+  $("rbody").innerHTML = CONTENT[key].b;
+  $("rbody").scrollTop = 0;                  // start at the top
+  $("d1").textContent = look.decor[0];
+  $("d2").textContent = look.decor[1];
+  $("rsay").textContent = look.hi;
+
+  document.body.classList.add("panel");      // hides the hint text
+  room.classList.add("show");                // starts the round wipe
+  $("back").focus();                         // keyboard users land on the Back button
+}
+
+// Close the room and go back to the map
+function leaveRoom(){
+  if(!$("room").classList.contains("show")) return;   // nothing to close
+
+  $("room").classList.remove("show");
+  document.body.classList.remove("panel");
+
+  // After the wipe finishes, bring the avatar back at the door
+  setTimeout(() => {
+    $("heroBody").classList.remove("enter");
+    busy = false;
+  }, 650);
+}
+
+$("back").onclick = leaveRoom;                       // Back button
+document.addEventListener("keydown", e => {          // Escape key also goes back
+  if(e.key === "Escape") leaveRoom();
+});
+
+
+/* ---------- 5. CLICKING A BUILDING ---------- */
+
+document.querySelectorAll(".spot").forEach(building => {
+
+  const visit = () => {
+    // Ignore clicks before Play, or while something is already happening
+    if(busy || !document.body.classList.contains("open")) return;
+    busy = true;
+
+    const key = building.dataset.key;   // "about", "projects", ...
+    const [x, y] = POS[key];            // where its door is
+
+    // 1) Avatar walks to the door
+    $("hero").style.transform = `translate(${x}px,${y}px)`;
+
+    // 2) Restart the little hop animation
+    const body = $("heroBody");
+    body.classList.remove("hop");
+    void body.getBoundingClientRect();   // (forces the browser to reset the animation)
+    body.classList.add("hop");
+
+    // 3) After the walk (0.8s): avatar shrinks into the door...
+    setTimeout(() => {
+      body.classList.add("enter");
+      // 4) ...and a moment later the room opens
+      setTimeout(() => enterRoom(key, building), 380);
+    }, 800);
+  };
+
+  building.addEventListener("click", visit);
+
+  // Keyboard support: Enter or Space also opens a building
+  building.addEventListener("keydown", e => {
+    if(e.key === "Enter" || e.key === " "){
+      e.preventDefault();
+      visit();
+    }
+  });
+});
+</script>
+</body>
+</html>
